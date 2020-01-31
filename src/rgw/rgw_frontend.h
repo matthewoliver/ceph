@@ -19,6 +19,9 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
+#define RGW_FRONTEND_SSL_CERT "rgw/frontend/cert"
+#define RGW_FRONTEND_SSL_KEY "rgw/frontend/key"
+
 namespace rgw::dmclock {
   class SyncScheduler;
   class ClientConfig;

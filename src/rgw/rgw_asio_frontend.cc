@@ -499,14 +499,14 @@ int AsioFrontend::init_ssl()
 
   // ssl configuration
   auto cert = config.find("ssl_certificate");
-  const bool have_cert = cert != config.end();
+  bool have_cert = cert != config.end();
   if (have_cert) {
     // only initialize the ssl context if it's going to be used
     ssl_context = boost::in_place(ssl::context::tls);
   }
 
   auto key = config.find("ssl_private_key");
-  const bool have_private_key = key != config.end();
+  bool have_private_key = key != config.end();
   if (have_private_key) {
     if (!have_cert) {
       lderr(ctx()) << "no ssl_certificate configured for ssl_private_key" << dendl;
@@ -517,6 +517,20 @@ int AsioFrontend::init_ssl()
       lderr(ctx()) << "failed to add ssl_private_key=" << key->second
           << ": " << ec.message() << dendl;
       return -ec.value();
+    }
+  } else {
+    // Attempt to find it in the mon config-key store
+    char* key;
+    int len = 0;
+    g_conf().get_val(std::string_view(RGW_FRONTEND_SSL_KEY), &key, len);
+    if (len > 0 and key) {
+      ssl_context = boost::in_place(ssl::context::tls);
+      ssl_context->use_private_key(boost::asio::const_buffer(key, len), ssl::context::pem, ec);
+      if (ec) {
+        lderr(ctx()) << "failed to add ssl_private_key from global mon config store: " << ec.message() << dendl;
+        return -ec.value();
+      }
+      have_private_key = true;
     }
   }
   if (have_cert) {
@@ -532,6 +546,29 @@ int AsioFrontend::init_ssl()
       if (ec) {
         lderr(ctx()) << "failed to use ssl_certificate=" << cert->second
             << " as a private key: " << ec.message() << dendl;
+        return -ec.value();
+      }
+    }
+  } else {
+    // Attempt to find it in the mon config-key store
+    char* cert;
+    int len = 0;
+    g_conf().get_val(std::string_view(RGW_FRONTEND_SSL_CERT), &cert, len);
+    if (len > 0 and cert) {
+      ssl_context = boost::in_place(ssl::context::tls);
+      ssl_context->use_certificate_chain(boost::asio::const_buffer(cert, len), ec);
+      if (ec) {
+        lderr(ctx()) << "failed to use ssl_certificate stored in global mon config store: " << ec.message() << dendl;
+        return -ec.value();
+      }
+      have_cert = true;
+    }
+    if (!have_private_key) {
+      // attempt to use it as a private key if a separate one wasn't provided
+      ssl_context->use_private_key(boost::asio::const_buffer(cert, len), ssl::context::pem, ec);
+      if (ec) {
+        lderr(ctx()) << "failed to use ssl_certificate stored in global mon config store as a private key: " 
+          << ec.message() << dendl;
         return -ec.value();
       }
     }
